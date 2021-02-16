@@ -63,13 +63,13 @@ a production system!
 To run the upgrade:
 
 ```
-helm upgrade <YOUR-HELM-RELEASE-NAME> jupyterhub/jupyterhub --version=<RELEASE-VERSION> -f config.yaml
+helm upgrade --cleanup-on-fail <YOUR-HELM-RELEASE-NAME> jupyterhub/jupyterhub --version=<RELEASE-VERSION> -f config.yaml
 ```
 
 For example, to upgrade to v0.6, enter and substituting `<YOUR-HELM-RELEASE-NAME>` and version v0.6:
 
 ```
-helm upgrade <YOUR-HELM-RELEASE-NAME> jupyterhub/jupyterhub --version=v0.6 -f config.yaml
+helm upgrade --cleanup-on-fail <YOUR-HELM-RELEASE-NAME> jupyterhub/jupyterhub --version=v0.6 -f config.yaml
 ```
 
 ### Database
@@ -93,34 +93,9 @@ will be performed automatically when you do a `helm upgrade`.
      db:
        upgrade: true
    ```
+
 4. Do a [`helm upgrade`](#upgrade-command). This should perform the database upgrade needed.
 5. Remove the lines added in step 3, and do another [`helm upgrade`](#upgrade-command).
-
-
-### [Role based access control](/security.html#use-role-based-access-control-rbac)
-
-[RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) is the user security model
-in Kubernetes that gives applications only as much access they need to the kubernetes
-API and not more. Prior to this, applications were all running with the equivalent
-of root on your Kubernetes cluster. This release adds appropriate roles for the
-various components of JupyterHub, for much better ability to secure clusters.
-
-RBAC is turned on by default. But, if your cluster is older than 1.8, or you have RBAC
-enforcement turned off, you might want to explicitly disable it. You can do so by adding
-the following snippet to your `config.yaml`:
-
-```yaml
-rbac:
-  enabled: false
-```
-
-This is especially true if you get an error like:
-
-```
-Error: the server rejected our request for an unknown reason (get clusterrolebindings.rbac.authorization.k8s.io)
-```
-
-when doing the upgrade!
 
 ### Custom Docker Images: JupyterHub version match
 
@@ -147,7 +122,7 @@ If the upgrade is failing on a test system or a system that does not serve users
 deleting the helm chart using:
 
 ```
-helm delete <YOUR-HELM-RELEASE-NAME> --purge
+helm delete <YOUR-HELM-RELEASE-NAME>
 ```
 
 `helm list` may be used to find <YOUR-HELM-RELEASE-NAME>.

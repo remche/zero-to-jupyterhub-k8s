@@ -3,6 +3,8 @@ tools/templates/rendered-templates/
 bin/
 .vagrant/
 tools/github.sqlite
+ci/ephemeral*
+tmp/
 
 .vscode
 
@@ -115,6 +117,7 @@ instance/
 # Sphinx documentation
 doc/build/
 doc/source/reference/reference.md
+doc/source/resources/reference.md
 
 # PyBuilder
 target/
@@ -149,3 +152,5 @@ pyvenv.cfg
 
 # Emacs
 .#*
+
+.idea

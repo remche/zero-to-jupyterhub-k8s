@@ -1,13 +1,61 @@
+imagePullSecret:
+  create: true
+  automaticReferenceInjection: true
+  registry: R
+  username: U
+  email: e@domain.com
+  password: P
+imagePullSecrets: [a, b]
+
 hub:
+  extraFiles:
+    my_config:
+      mountPath: /usr/local/etc/jupyterhub/jupyterhub_config.d/my_config.py
+      stringData: |
+        with open("/tmp/created-by-extra-files-config.txt", "w") as f:
+            f.write("hello world!")
+    binaryData1: &binaryData1
+      mountPath: /tmp/binaryData.txt
+      mode: 0666
+      binaryData: |
+        aGVsbG8gd
+        29ybGQhCg==
+    binaryData2: &binaryData2
+      mountPath: /tmp/dir1/binaryData.txt
+      mode: 0666
+      binaryData: aGVsbG8gd29ybGQhCg==
+    stringData1: &stringData1
+      mountPath: /tmp/stringData.txt
+      mode: 0666
+      stringData: hello world!
+    stringData2: &stringData2
+      mountPath: /tmp/dir1/stringData.txt
+      mode: 0666
+      stringData: hello world!
+    data-yaml: &data-yaml
+      mountPath: /etc/test/data.yaml
+      mode: 0444
+      data:
+        config:
+          map:
+            number: 123
+            string: "hi"
+          list: [1, 2]
+    data-yml: &data-yml
+      <<: *data-yaml
+      mountPath: /etc/test/data.yml
+    data-json: &data-json
+      <<: *data-yaml
+      mountPath: /etc/test/data.json
+    data-toml: &data-toml
+      <<: *data-yaml
+      mountPath: /etc/test/data.toml
   service:
     type: ClusterIP
     ports:
       nodePort:
   baseUrl: /
-  cookieSecret: mock
   publicURL: mock-public-url
-  nodeSelector:
-    node-type: mock
   activeServerLimit: 3
   deploymentStrategy:
     type: Recreate
@@ -31,16 +79,28 @@ hub:
     mock: mock
   annotations:
     mock: mock
+  image:
+    pullSecrets: [c]
   initContainers:
     - name: mock-init-container-name
       image: mock-init-container-image
+  command:
+    - tini
+  args:
+    - jupyterhub
+    - "--mock-flag"
+    - "{{ .Values.hub.baseUrl }}"
   extraConfig:
     test: |-
       c.Spawner.cmd = 'mock'
   extraConfigMap:
     mock.entry: mock-config-map-entry
   extraEnv:
-    MOCK_HUB_ENV: mock
+    IGNORED_KEY_NAME:
+      name: MOCK_ENV_VAR_NAME1
+      value: MOCK_ENV_VAR_VALUE1
+    MOCK_ENV_VAR_NAME2:
+      value: MOCK_ENV_VAR_VALUE2
   extraContainers: []
   extraVolumes: []
   extraVolumeMounts: []
@@ -60,16 +120,30 @@ hub:
       - to:
           - ipBlock:
               cidr: 0.0.0.0/0
+    interNamespaceAccessLabels: ignore
+    allowedIngressPorts: []
   allowNamedServers: true
-
+  nodeSelector:
+    node-type: mock
+  tolerations:
+    - key: "mock-taint-to-tolerates-key"
+      operator: "Equal"
+      value: "mock-taint-to-tolerates-value"
+      effect: "NoSchedule"
+    - key: "mock-taint-to-tolerates-key"
+      operator: "Equal"
+      value: "mock-taint-to-tolerates-value"
+      effect: "NoExecute"
 
 rbac:
   enabled: true
 
-
 proxy:
-  secretToken: '0000000000000000000000000000000000000000000000000000000000000000'
   service:
+    extraPorts:
+      - name: ssh
+        port: 22
+        targetPort: ssh
     type: LoadBalancer
     labels:
       MOCK_PROXY_ENV: mock
@@ -79,11 +153,40 @@ proxy:
       http:
       https:
   chp:
+    extraCommandLineFlags:
+      - "--auto-rewrite"
+      - "--mock-flag {{ .Values.proxy.chp.resources.requests.memory }}"
     resources:
       requests:
         cpu: 100m
         memory: 512Mi
+    nodeSelector:
+      node-type: mock
+    tolerations:
+      - key: "mock-taint-to-tolerates-key"
+        operator: "Equal"
+        value: "mock-taint-to-tolerates-value"
+        effect: "NoSchedule"
+      - key: "mock-taint-to-tolerates-key"
+        operator: "Equal"
+        value: "mock-taint-to-tolerates-value"
+        effect: "NoExecute"
+    networkPolicy:
+      enabled: true
+      egress:
+        - to:
+            - ipBlock:
+                cidr: 0.0.0.0/0
+      interNamespaceAccessLabels: accept
+      allowedIngressPorts: [http, https]
+    pdb:
+      enabled: true
   traefik:
+    extraPorts:
+      - name: ssh
+        containerPort: 8022
+    labels:
+      hub.jupyter.org/test-label: mock
     resources:
       requests:
         cpu: 200m
@@ -91,6 +194,29 @@ proxy:
       limits:
         cpu: 200m
         memory: 1Gi
+    extraEnv:
+      LEGO_CA_CERTIFICATES: /etc/pebble/root-cert.pem
+    nodeSelector:
+      node-type: mock
+    tolerations:
+      - key: "mock-taint-to-tolerates-key"
+        operator: "Equal"
+        value: "mock-taint-to-tolerates-value"
+        effect: "NoSchedule"
+      - key: "mock-taint-to-tolerates-key"
+        operator: "Equal"
+        value: "mock-taint-to-tolerates-value"
+        effect: "NoExecute"
+    networkPolicy:
+      enabled: true
+      egress:
+        - to:
+            - ipBlock:
+                cidr: 0.0.0.0/0
+      interNamespaceAccessLabels: accept
+      allowedIngressPorts: [http, https]
+    pdb:
+      enabled: true
   secretSync:
     resources:
       requests:
@@ -103,52 +229,32 @@ proxy:
     mock-proxy-label: mock
   nodeSelector:
     mock-proxy-node-selector: mock
-  pdb:
-    enabled: true
   https:
     enabled: true
     type: letsencrypt
     #type: letsencrypt, manual, offload, secret
     letsencrypt:
-      contactEmail: 'e@domain.com'
+      contactEmail: "e@domain.com"
     manual:
       key: mock-key
       cert: mock-cert
     secret:
-      name: 'mock-secret-name'
-      key: 'mock-key'
-      crt: 'mock-crt'
+      name: "mock-secret-name"
+      key: "mock-key"
+      crt: "mock-crt"
     hosts: [domain.com]
-  networkPolicy:
-    enabled: true
-    egress:
-      - to:
-          - ipBlock:
-              cidr: 0.0.0.0/0
-
-
-auth:
-  type: dummy
-  whitelist:
-    users:
-      - mock
-  admin:
-    access: true
-    users:
-      - mock
-  dummy:
-    password:
-  ldap:
-    dn:
-      search: {}
-      user: {}
-    user: {}
-  state:
-    enabled: true
-    cryptoKey: mock-crypto-key
-
 
 singleuser:
+  profileList:
+    - display_name: "mock display name 1"
+      description: |
+        mock description 1
+      default: True
+    - display_name: "mock display name 2"
+      description: |
+        mock description 2
+      kubespawner_override:
+        image: XYZ:XYZ
   nodeSelector:
     mock-node-selector: mock
   extraTolerations:
@@ -159,52 +265,52 @@ singleuser:
   extraNodeAffinity:
     required:
       - matchExpressions:
-        - key: hub.jupyter.org/test-required-node
-          operator: In
-          values: [test]
+          - key: hub.jupyter.org/test-required-node
+            operator: In
+            values: [test]
     preferred:
       - weight: 10
         preference:
           matchExpressions:
-          - key: hub.jupyter.org/test-preferred-node
-            operator: In
-            values: [test]
+            - key: hub.jupyter.org/test-preferred-node
+              operator: In
+              values: [test]
   extraPodAffinity:
     required:
       - labelSelector:
           matchExpressions:
-          - key: hub.jupyter.org/test-required-pod
-            operator: In
-            values: [test]
+            - key: hub.jupyter.org/test-required-pod
+              operator: In
+              values: [test]
         topologyKey: failure-domain.beta.kubernetes.io/zone
     preferred:
       - weight: 10
         podAffinityTerm:
           labelSelector:
             matchExpressions:
-            - key: hub.jupyter.org/test-preferred-pod
-              operator: In
-              values: [test]
+              - key: hub.jupyter.org/test-preferred-pod
+                operator: In
+                values: [test]
           topologyKey: kubernetes.io/hostname
   extraPodAntiAffinity:
     required:
       - labelSelector:
           matchExpressions:
-          - key: hub.jupyter.org/test-required-anti-pod
-            operator: In
-            values: [test]
+            - key: hub.jupyter.org/test-required-anti-pod
+              operator: In
+              values: [test]
         topologyKey: failure-domain.beta.kubernetes.io/zone
     preferred:
       - weight: 10
         podAffinityTerm:
           labelSelector:
             matchExpressions:
-            - key: hub.jupyter.org/test-preferred-anti-pod
-              operator: In
-              values: [test]
+              - key: hub.jupyter.org/test-preferred-anti-pod
+                operator: In
+                values: [test]
           topologyKey: kubernetes.io/hostname
   cloudMetadata:
-    enabled: true
+    blockWithIptables: true
     ip: 169.254.169.254
   networkPolicy:
     enabled: true
@@ -214,6 +320,8 @@ singleuser:
               cidr: 0.0.0.0/0
               except:
                 - 169.254.169.254/32
+    interNamespaceAccessLabels: ignore
+    allowedIngressPorts: []
   events: true
   extraLabels: {}
   extraEnv: {}
@@ -237,7 +345,7 @@ singleuser:
     extraVolumeMounts: []
     static:
       pvcName:
-      subPath: '{username}'
+      subPath: "{username}"
     capacity: 10Gi
     homeMountPath: /home/jovyan
     dynamic:
@@ -245,12 +353,6 @@ singleuser:
       pvcNameTemplate: claim-{username}{servername}
       volumeNameTemplate: volume-{username}{servername}
       storageAccessModes: [ReadWriteOnce]
-  imagePullSecret:
-    enabled: true
-    registry: R
-    username: U
-    email: e@domain.com
-    password: P
   startTimeout: 300
   cpu:
     guarantees: 1G
@@ -266,7 +368,6 @@ singleuser:
   cmd: jupyterhub-singleuser
   defaultUrl: /
 
-
 scheduling:
   userScheduler:
     enabled: true
@@ -274,6 +375,17 @@ scheduling:
     image:
       name: gcr.io/google_containers/kube-scheduler-amd64
       tag: v1.11.2
+    nodeSelector:
+      node-type: mock
+    tolerations:
+      - key: "mock-taint-to-tolerates-key"
+        operator: "Equal"
+        value: "mock-taint-to-tolerates-value"
+        effect: "NoSchedule"
+      - key: "mock-taint-to-tolerates-key"
+        operator: "Equal"
+        value: "mock-taint-to-tolerates-value"
+        effect: "NoExecute"
   podPriority:
     enabled: true
   userPlaceholder:
@@ -287,12 +399,31 @@ scheduling:
     nodeAffinity:
       matchNodePurpose: require
 
-
 prePuller:
+  extraTolerations:
+    - key: "mock-taint-to-tolerates-key"
+      operator: "Equal"
+      value: "mock-taint-to-tolerates-value"
+      effect: "NoSchedule"
+    - key: "mock-taint-to-tolerates-key"
+      operator: "Equal"
+      value: "mock-taint-to-tolerates-value"
+      effect: "NoExecute"
   hook:
     enabled: true
     extraEnv:
       MOCK_ENV: mock
+    nodeSelector:
+      node-type: mock
+    tolerations:
+      - key: "mock-taint-to-tolerates-key"
+        operator: "Equal"
+        value: "mock-taint-to-tolerates-value"
+        effect: "NoSchedule"
+      - key: "mock-taint-to-tolerates-key"
+        operator: "Equal"
+        value: "mock-taint-to-tolerates-value"
+        effect: "NoExecute"
   continuous:
     enabled: true
   extraImages:
@@ -303,14 +434,18 @@ prePuller:
       name: mock-user/mock-image2
       tag: mock-tag
 
-
 ingress:
   enabled: true
   annotations:
     mock: mock
-  hosts: []
-  tls: []
-
+  hosts:
+    - mocked1.domain.name
+    - mocked2.domain.name
+  tls:
+    - secretName: jupyterhub-tls
+      hosts:
+        - mocked1.domain.name
+        - mocked2.domain.name
 
 cull:
   enabled: true
@@ -318,8 +453,7 @@ cull:
   timeout: 3600
   every: 600
   concurrency: 10
-  maxAge: 3600*8
-
+  maxAge: 28800
 
 debug:
   enabled: true

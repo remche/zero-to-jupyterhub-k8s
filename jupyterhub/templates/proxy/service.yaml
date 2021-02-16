@@ -1,12 +1,14 @@
-{{- $HTTPS := .Values.proxy.https.enabled -}}
-{{- $autoHTTPS := and $HTTPS (and (eq .Values.proxy.https.type "letsencrypt") .Values.proxy.https.hosts) -}}
-{{- $offloadHTTPS := and $HTTPS (eq .Values.proxy.https.type "offload") -}}
-{{- $manualHTTPS := and $HTTPS (eq .Values.proxy.https.type "manual") -}}
-{{- $manualHTTPSwithsecret := and $HTTPS (eq .Values.proxy.https.type "secret") -}}
+{{- $enabled := .Values.proxy.https.enabled -}}
+{{- $autoHTTPS := and $enabled (and (eq .Values.proxy.https.type "letsencrypt") .Values.proxy.https.hosts) -}}
+{{- $manualHTTPS := and $enabled (eq .Values.proxy.https.type "manual") -}}
+{{- $manualHTTPSwithsecret := and $enabled (eq .Values.proxy.https.type "secret") -}}
+{{- $offloadHTTPS := and $enabled (eq .Values.proxy.https.type "offload") -}}
+{{- $valid := or $autoHTTPS (or $manualHTTPS (or $manualHTTPSwithsecret $offloadHTTPS)) -}}
+{{- $HTTPS := and $enabled $valid -}}
 apiVersion: v1
 kind: Service
 metadata:
-  name: proxy-api
+  name: {{ include "jupyterhub.proxy-api.fullname" . }}
   labels:
     {{- $_ := merge (dict "componentSuffix" "-api") . }}
     {{- include "jupyterhub.labels" $_ | nindent 4 }}
@@ -20,16 +22,16 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: proxy-public
+  name: {{ include "jupyterhub.proxy-public.fullname" . }}
   labels:
     {{- $_ := merge (dict "componentSuffix" "-public") . }}
     {{- include "jupyterhub.labels" $_ | nindent 4 }}
-    {{- if .Values.proxy.service.labels }}
-    {{- .Values.proxy.service.labels | toYaml | trimSuffix "\n" | nindent 4 }}
+    {{- with .Values.proxy.service.labels }}
+    {{- . | toYaml | trimSuffix "\n" | nindent 4 }}
     {{- end }}
-  {{- if .Values.proxy.service.annotations }}
+  {{- with .Values.proxy.service.annotations }}
   annotations:
-    {{- .Values.proxy.service.annotations | toYaml | trimSuffix "\n" | nindent 4 }}
+    {{- . | toYaml | trimSuffix "\n" | nindent 4 }}
   {{- end }}
 spec:
   selector:
@@ -43,6 +45,9 @@ spec:
     {{- if $HTTPS }}
     - name: https
       port: 443
+      # When HTTPS termination is handled outside our helm chart, pass traffic
+      # coming in via this Service's port 443 to targeted pod's port meant for
+      # HTTP traffic.
       {{- if $offloadHTTPS }}
       targetPort: http
       {{- else }}
@@ -58,6 +63,9 @@ spec:
       {{- with .Values.proxy.service.nodePorts.http }}
       nodePort: {{ . }}
       {{- end }}
+    {{- with .Values.proxy.service.extraPorts }}
+    {{- . | toYaml | trimSuffix "\n" | nindent 4 }}
+    {{- end }}
   type: {{ .Values.proxy.service.type }}
   {{- with .Values.proxy.service.loadBalancerIP }}
   loadBalancerIP: {{ . }}

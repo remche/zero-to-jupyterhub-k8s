@@ -1,11 +1,10 @@
 {{- $HTTPS := (and .Values.proxy.https.hosts .Values.proxy.https.enabled) }}
 {{- $autoHTTPS := (and $HTTPS (eq .Values.proxy.https.type "letsencrypt")) }}
 {{- if $autoHTTPS -}}
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: autohttps
+  name: {{ include "jupyterhub.autohttps.fullname" . }}
   labels:
     {{- include "jupyterhub.labels" . | nindent 4 }}
 spec:
@@ -18,6 +17,9 @@ spec:
       labels:
         {{- include "jupyterhub.matchLabels" . | nindent 8 }}
         hub.jupyter.org/network-access-proxy-http: "true"
+        {{- with .Values.proxy.traefik.labels }}
+        {{- . | toYaml | trimSuffix "\n" | nindent 8 }}
+        {{- end }}
       annotations:
         # Only force a restart through a change to this checksum when the static
         # configuration is changed, as the dynamic can be updated after start.
@@ -26,37 +28,60 @@ spec:
         checksum/static-config: {{ include "jupyterhub.traefik.yaml" . | fromYaml | merge .Values.proxy.traefik.extraStaticConfig | toYaml | sha256sum }}
     spec:
       {{- if .Values.rbac.enabled }}
-      serviceAccountName: autohttps
+      serviceAccountName: {{ include "jupyterhub.autohttps.fullname" . }}
       {{- end }}
       {{- if .Values.scheduling.podPriority.enabled }}
-      priorityClassName: {{ .Release.Name }}-default-priority
+      priorityClassName: {{ include "jupyterhub.priority.fullname" . }}
       {{- end }}
-      nodeSelector: {{ toJson .Values.proxy.nodeSelector }}
+      nodeSelector: {{ toJson .Values.proxy.traefik.nodeSelector }}
+      tolerations:
+        - key: hub.jupyter.org/dedicated
+          operator: Equal
+          value: core
+          effect: NoSchedule
+        - key: hub.jupyter.org_dedicated
+          operator: Equal
+          value: core
+          effect: NoSchedule
+        {{- with .Values.proxy.traefik.tolerations }}
+        {{- . | toYaml | trimSuffix "\n" | nindent 8 }}
+        {{- end }}
       {{- include "jupyterhub.coreAffinity" . | nindent 6 }}
       volumes:
         - name: certificates
           emptyDir: {}
         - name: traefik-config
           configMap:
-            name: traefik-proxy-config
-      initContainers:
-      - name: load-acme
-        image: "{{ .Values.proxy.secretSync.image.name }}:{{ .Values.proxy.secretSync.image.tag }}"
-        {{- with .Values.proxy.secretSync.image.pullPolicy }}
-        imagePullPolicy: {{ . }}
+            name: {{ include "jupyterhub.autohttps.fullname" . }}
+        {{- with .Values.proxy.traefik.extraVolumes }}
+        {{- . | toYaml | trimSuffix "\n" | nindent 8 }}
         {{- end }}
-        args:
-          - load
-          - proxy-public-tls-acme
-          - acme.json
-          - /etc/acme/acme.json
-        env:
-        # We need this to get logs immediately
-        - name: PYTHONUNBUFFERED
-          value: "True"
-        volumeMounts:
-          - name: certificates
-            mountPath: /etc/acme
+      {{- with include "jupyterhub.imagePullSecrets" (dict "root" . "image" .Values.proxy.traefik.image) }}
+      imagePullSecrets: {{ . }}
+      {{- end }}
+      initContainers:
+        - name: load-acme
+          image: "{{ .Values.proxy.secretSync.image.name }}:{{ .Values.proxy.secretSync.image.tag }}"
+          {{- with .Values.proxy.secretSync.image.pullPolicy }}
+          imagePullPolicy: {{ . }}
+          {{- end }}
+          args:
+            - load
+            - {{ include "jupyterhub.proxy-public-tls.fullname" . }}
+            - acme.json
+            - /etc/acme/acme.json
+          env:
+            # We need this to get logs immediately
+            - name: PYTHONUNBUFFERED
+              value: "True"
+            {{- include "jupyterhub.extraEnv" .Values.proxy.traefik.extraEnv | nindent 12 }}
+          volumeMounts:
+            - name: certificates
+              mountPath: /etc/acme
+          {{- with .Values.proxy.secretSync.containerSecurityContext }}
+          securityContext:
+            {{- . | toYaml | trimSuffix "\n" | nindent 12 }}
+          {{- end }}
       containers:
         - name: traefik
           image: "{{ .Values.proxy.traefik.image.name }}:{{ .Values.proxy.traefik.image.tag }}"
@@ -67,20 +92,28 @@ spec:
             {{- .Values.proxy.traefik.resources | toYaml | trimSuffix "\n" | nindent 12 }}
           ports:
             - name: http
-              containerPort: 80
+              containerPort: 8080
             - name: https
-              containerPort: 443
+              containerPort: 8443
+            {{- with .Values.proxy.traefik.extraPorts }}
+            {{- . | toYaml | trimSuffix "\n" | nindent 12 }}
+            {{- end }}
           volumeMounts:
             - name: traefik-config
               mountPath: /etc/traefik
             - name: certificates
               mountPath: /etc/acme
-          readinessProbe:
-            tcpSocket:
-              port: http
-            initialDelaySeconds: 1
-            periodSeconds: 1
-            failureThreshold: 3
+            {{- with .Values.proxy.traefik.extraVolumeMounts }}
+            {{- . | toYaml | trimSuffix "\n" | nindent 12 }}
+            {{- end }}
+          {{- with .Values.proxy.traefik.extraEnv }}
+          env:
+            {{- include "jupyterhub.extraEnv" . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.proxy.traefik.containerSecurityContext }}
+          securityContext:
+            {{- . | toYaml | trimSuffix "\n" | nindent 12 }}
+          {{- end }}
         - name: secret-sync
           image: "{{ .Values.proxy.secretSync.image.name }}:{{ .Values.proxy.secretSync.image.tag }}"
           {{- with .Values.proxy.secretSync.image.pullPolicy }}
@@ -92,7 +125,7 @@ spec:
             - --label=release={{ .Release.Name }}
             - --label=chart={{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
             - --label=heritage=secret-sync
-            - proxy-public-tls-acme
+            - {{ include "jupyterhub.proxy-public-tls.fullname" . }}
             - acme.json
             - /etc/acme/acme.json
           env:
@@ -102,4 +135,8 @@ spec:
           volumeMounts:
             - name: certificates
               mountPath: /etc/acme
+          {{- with .Values.proxy.secretSync.containerSecurityContext }}
+          securityContext:
+            {{- . | toYaml | trimSuffix "\n" | nindent 12 }}
+          {{- end }}
 {{- end }}

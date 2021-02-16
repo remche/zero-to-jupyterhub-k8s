@@ -5,25 +5,44 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"time"
 	"net/http"
+
+	"github.com/hashicorp/go-retryablehttp"
 )
 
-// Partial structure of a Kubernetes DaemonSet object
-// Only contains fields we will actively be using, to make JSON parsing nicer
+// Partial structure of a Kubernetes DaemonSet object. Note that we want to use
+// the non-optional fields of the Status struct only to ensure this is a robust
+// implementation.
+//
+// ref: https://github.com/kubernetes/kubernetes/blob/e23d83eead3b5ae57731afb0209f4a2aaa4009dd/pkg/apis/apps/types.go#L590
 type DaemonSet struct {
 	Kind   string `json:"kind"`
 	Status struct {
+		// The number of nodes that are running at least 1
+		// daemon pod and are supposed to run the daemon pod.
+		CurrentNumberScheduled int `json:"currentNumberScheduled"`
+		// The number of nodes that are running the daemon pod, but are
+		// not supposed to run the daemon pod.
 		DesiredNumberScheduled int `json:"desiredNumberScheduled"`
-		NumberReady            int `json:"numberReady"`
+		// The number of nodes that should be running the daemon pod and have one
+		// or more of the daemon pod running and ready.
+		NumberReady int `json:"numberReady"`
 	} `json:"status"`
 }
 
 // Return a *DaemonSet and the relevant state its in
 func getDaemonSet(transportPtr *http.Transport, server string, headers map[string]string, namespace string, daemonSet string) (*DaemonSet, error) {
-	client := &http.Client{Transport: transportPtr}
+	// Rather than die on startup if the first request fails, retry a few times with backoff before giving up
+	// This can happen if we're e.g. waiting for a service mesh to come up and is generally a good idea.
+	client := retryablehttp.NewClient()
+	client.RetryMax = 5
+	client.RetryWaitMin = time.Duration(5)*time.Second
+	client.HTTPClient.Transport = transportPtr
+
 	url := server + "/apis/apps/v1/namespaces/" + namespace + "/daemonsets/" + daemonSet
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := retryablehttp.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -54,11 +73,18 @@ func getDaemonSet(transportPtr *http.Transport, server string, headers map[strin
 	return ds, err
 }
 
-func isImagesPresent(ds *DaemonSet) bool {
+// Return a bool indicating if the provided DaemonSet's _currently_ scheduled
+// pods (which does the image pulling) are ready, or in the case of a
+// strictCheck, if the _desired_ number of scheduled pods are ready.
+func areDaemonSetPodsReady(ds *DaemonSet, waitForPodsToSchedule bool) bool {
+	current := ds.Status.CurrentNumberScheduled
 	desired := ds.Status.DesiredNumberScheduled
 	ready := ds.Status.NumberReady
 
-	log.Printf("%d of %d nodes currently has the required images.", ready, desired)
-
-	return desired == ready
+	log.Printf("%d image puller pods are ready out of the %d currently scheduled and %d desired number scheduled.", ready, current, desired)
+	if waitForPodsToSchedule {
+		return ready == desired
+	} else {
+		return ready >= current
+	}
 }

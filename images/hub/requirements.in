@@ -1,7 +1,13 @@
-# JupyterHub's version is defined in chartpress.yaml
+# This file is automatically maintained by Dependabot, as configured in
+# .github/dependabot.yaml. It can also be updated by...
+#
+#    ./dependencies freeze --upgrade
+#
+
+# JupyterHub itself
+jupyterhub
 
 ## Authenticators
-jupyterhub-dummyauthenticator
 jupyterhub-firstuseauthenticator
 jupyterhub-hmacauthenticator
 jupyterhub-ldapauthenticator
@@ -13,7 +19,7 @@ oauthenticator
 
 # Authenticator optional dependencies
 mwoauth
-globus_sdk[jwt]
+pyjwt
 
 ## Kubernetes spawner
 jupyterhub-kubespawner
